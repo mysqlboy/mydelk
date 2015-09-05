@@ -1,0 +1,2 @@
+### logstash.list
+deb http://packages.elasticsearch.org/logstash/1.5/debian stable main

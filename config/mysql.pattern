@@ -1,0 +1,7 @@
+SELECT %{WORD:sql_class} +.* (FROM|from) +%{WORD:table}.*$
+INSRPL ^%{WORD:sql_class} +(into|INTO) +%{WORD:table}.*$
+UPDATE ^%{WORD:sql_class} +%{WORD:table} +(SET|set) +.*$
+DELETE ^%{WORD:sql_class} +(FROM|from) +%{WORD:table} +(WHERE|where).*$
+ALTER ^%{WORD:sql_class} +%{WORD:table} +(ADD|add|CREATE|create|DROP|drop).*$
+DROP ^%{WORD:sql_class} (TABLE|table) +%{WORD:table}.*$
+ALLQUERY %{GREEDYDATA:sql};

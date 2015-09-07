@@ -1,0 +1,126 @@
+input {
+        file {
+                path => '/var/log/mysql/audit.log_'
+                type => 'percona-audit'
+                start_position => 'beginning'
+                codec => json
+        }
+        file {
+                path => '/var/log/mysql/slow.log'
+                type => 'percona-slow'
+                start_position => 'beginning'
+                codec => multiline {
+                                    pattern => "^# User@Host:"
+                                    negate => true
+                                    what => previous
+                }
+        }
+}
+filter {
+        if [type] == 'percona-audit_' {
+                date {
+                        match => [ "[audit_record][timestamp]", "YYYY-MM-dd'T'H:mm:ss' 'ZZZ", "ISO8601" ]
+                        target => ["@timestamp"]
+                }
+
+                if [audit_record][user] == "pct[pct] @ localhost [127.0.0.1]" {
+                        drop {}
+                }
+
+                if [audit_record][command_class] == "select" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "%{WORD:[audit_record][qtype]} %{GREEDYDATA:[audit_record][columns]} (from|FROM) %{WORD:[audit_record][table]}" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+                if [audit_record][command_class] == "update" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "%{WORD:[audit_record][qtype]} %{WORD:[audit_record][table]}" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+                if [audit_record][command_class] == "insert" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "%{WORD:[audit_record][qtype]} (into|INTO) %{WORD:[audit_record][table]}" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+                if [audit_record][command_class] == "" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "%{WORD:[audit_record][qtype]} (into|INTO) %{WORD:[audit_record][table]}" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+               if [audit_record][command_class] == "delete" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "%{WORD:qtype} (from|FROM) %{WORD:[audit_record][table]}" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+               if [audit_record][command_class] == "alter_table" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "(%{WORD:[audit_record][qtype]} %{WORD:object} %{DATA:[audit_record][table]} %{DATA:[audit_record][verb]} %{DATA:[audit_record][struct]} %{GREEDYDATA})" ]
+                                remove_field => "object"
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+                if [audit_record][command_class] == "set_option" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "(%{WORD:[audit_record][qtype]} %{WORD:[audit_record][scope]} %{WORD:[audit_record][variable]}(=| = )%{GREEDYDATA:[audit_record][value]})" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+
+                if [audit_record][command_class] == "grant" {
+                        grok {
+                                match => [ "[audit_record][sqltext]", "(%{WORD:[audit_record][qtype]} %{WORD:[audit_record][scope]} %{WORD:[audit_record][variable]}(=| = )%{GREEDYDATA:[audit_record][value]})" ]
+                                remove_field => "[audit_record][qtype]"
+                        }
+                }
+        } #end audit
+        else if [type] == 'percona-slow' {
+                # match username
+                grok {
+                  match => [ "message", "^# User@Host: %{USER:user}.*@ %{HOST:userhost}.*$" ]
+                # match query metrics
+                }
+                grok {
+                  match => [ "message", "^# Query_time: %{NUMBER:duration}.*Lock_time: %{NUMBER:lock_wait}.*Rows_sent: %{NUMBER:sent}.*Rows_examined: %{NUMBER:examined}.*Rows_affected: %{NUMBER:affected}$"]
+                }
+                # match timestamp
+                grok {
+                  match => [ "message", "SET timestamp=%{NUMBER:timestamp};" ]
+                }
+                # get class & table if select
+                grok {
+                  patterns_dir => "/etc/logstash/patterns/"
+                  match => [ "message", "%{INSRPL}" ]
+                  match => [ "message", "%{UPDATE}" ]
+                  match => [ "message", "%{SELECT}" ]
+                  match => [ "message", "%{DELETE}" ]
+                  match => [ "message", "!(^#) %{ALLQUERY}" ]
+                }
+                # convert timestamp
+                date {
+                  match => [ "timestamp", "UNIX" ]
+                }
+                # drop the logstash or the 'seen' timestamp
+                mutate {
+                  remove_field => "timestamp"
+                }
+          }
+}
+
+output {
+        stdout { codec => "rubydebug" }
+
+        elasticsearch {
+                  host => '127.0.0.1'
+        }
+}

@@ -5,5 +5,5 @@
 
 service elasticsearch start
 sleep 3
-/usr/local/kibana/bin/kibana &
+/opt/kibana/bin/kibana &
 /opt/logstash/bin/logstash -f /etc/logstash/conf.d/logstash.conf $LSDEBUG
